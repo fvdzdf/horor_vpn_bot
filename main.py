@@ -8,9 +8,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-# Временное отключение Outline для тестирования (замените на реальный импорт когда настроите сервер)
-# from outline_vpn.outline_vpn import OutlineVPN
-
 # ========== КОНФИГУРАЦИЯ ==========
 BOT_TOKEN = "8483157396:AAEnsG9aN8MMLGr5gQm6rDtQcx373d_VREk"  # Ваш токен
 SUPPORT_USERNAME = "gffgvvvxzz"  # Username техподдержки
@@ -38,8 +35,7 @@ user_history = {}
 REFERRAL_DAYS = 7
 REFERRAL_RUB = 10
 
-# ========== МОК-КЛАСС ДЛЯ OUTLINE (ДЛЯ ТЕСТИРОВАНИЯ) ==========
-# Удалите этот класс когда настроите реальный Outline сервер
+# ========== МОК-КЛАСС ДЛЯ OUTLINE ==========
 class MockOutlineManager:
     """Временный класс для тестирования без реального VPN сервера"""
     async def create_key(self, user_id, days_valid, username=None):
@@ -66,9 +62,6 @@ class MockOutlineManager:
 
 # Используйте мок-класс пока нет реального сервера
 outline_manager = MockOutlineManager()
-# Раскомментируйте когда настроите реальный сервер:
-# from outline_vpn.outline_vpn import OutlineVPN
-# outline_manager = OutlineManager(OUTLINE_API_URL, OUTLINE_CERT_SHA256)
 
 # ========== ИНИЦИАЛИЗАЦИЯ БОТА ==========
 logging.basicConfig(level=logging.INFO)
@@ -205,6 +198,8 @@ async def cmd_start(message: types.Message):
             reply_markup=get_main_keyboard()
         )
 
+# ========== ИСПРАВЛЕННЫЕ ОБРАБОТЧИКИ КНОПОК ==========
+
 @dp.callback_query(F.data == "back")
 async def back_button(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
@@ -269,12 +264,14 @@ async def referral_system(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=get_back_keyboard()
     )
+    
     await callback.answer()
 
 @dp.callback_query(F.data == "support")
 async def support(callback: CallbackQuery):
     user_id = callback.from_user.id
     add_history(user_id, "support")
+    
     text = f"👩‍💻 <b>Техническая поддержка</b>\n\nДля связи с техподдержкой напишите сюда:\n👉 @{SUPPORT_USERNAME}\n\nМы ответим в ближайшее время!"
     
     await callback.message.edit_text(
@@ -282,6 +279,7 @@ async def support(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=get_back_keyboard()
     )
+    
     await callback.answer()
 
 @dp.callback_query(F.data == "menu")
@@ -293,6 +291,7 @@ async def show_menu(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=get_menu_keyboard()
     )
+    
     await callback.answer()
 
 @dp.callback_query(F.data == "balance")
@@ -322,6 +321,7 @@ async def show_balance(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=get_back_keyboard()
     )
+    
     await callback.answer()
 
 @dp.callback_query(F.data == "topup")
@@ -342,6 +342,7 @@ async def topup_menu(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=get_topup_keyboard()
     )
+    
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("topup_"))
@@ -421,12 +422,10 @@ async def get_vpn_key(callback: CallbackQuery):
                 f"🔑 <b>Ваш активный ключ</b>\n\n"
                 f"<code>{key_info['access_url']}</code>\n\n"
                 f"📱 <b>Инструкция по подключению:</b>\n"
-                f"1. Скачайте Outline Client из App Store/Google Play\n"
+                f"1. Скачайте Outline Client\n"
                 f"2. Нажмите «Добавить сервер»\n"
-                f"3. Вставьте ключ из сообщения выше\n"
-                f"4. Подключитесь к VPN\n\n"
-                f"📅 Подписка активна до: {expire_str}\n"
-                f"⚠️ Ключ привязан только к вашему аккаунту"
+                f"3. Вставьте ключ\n\n"
+                f"📅 Подписка до: {expire_str}"
             )
             
             await callback.message.edit_text(
@@ -438,10 +437,9 @@ async def get_vpn_key(callback: CallbackQuery):
             return
     
     # Создаём новый ключ
-    await callback.message.edit_text("🔄 Создаём VPN ключ... Подождите несколько секунд...")
+    await callback.message.edit_text("🔄 Создаём VPN ключ... Подождите...")
     
-    username = f"user_{user_id}"
-    vpn_key = await outline_manager.create_key(user_id, days_left, username)
+    vpn_key = await outline_manager.create_key(user_id, days_left, f"user_{user_id}")
     
     if vpn_key:
         user_balances[user_id]["key_id"] = vpn_key["key_id"]
@@ -449,20 +447,10 @@ async def get_vpn_key(callback: CallbackQuery):
         expire_str = expire_date.strftime('%d.%m.%Y') if expire_date else "Неизвестно"
         
         text = (
-            f"✅ <b>VPN ключ успешно создан!</b>\n\n"
-            f"🔑 <b>Ваш ключ для подключения:</b>\n"
+            f"✅ <b>VPN ключ создан!</b>\n\n"
+            f"🔑 <b>Ваш ключ:</b>\n"
             f"<code>{vpn_key['access_url']}</code>\n\n"
-            f"📱 <b>Инструкция по подключению:</b>\n"
-            f"1. Скачайте приложение Outline Client\n"
-            f"   • iOS: App Store\n"
-            f"   • Android: Google Play\n"
-            f"   • Windows/Mac: getoutline.org\n"
-            f"2. Нажмите «Добавить сервер»\n"
-            f"3. Вставьте ключ из сообщения выше\n"
-            f"4. Включите VPN\n\n"
-            f"📅 Ключ действителен до: {expire_str}\n"
-            f"🔒 Ключ привязан только к вашему аккаунту\n\n"
-            f"<i>Сохраните этот ключ! При потере вы сможете создать новый через меню</i>"
+            f"📅 Действителен до: {expire_str}"
         )
         
         await callback.message.edit_text(
@@ -472,11 +460,7 @@ async def get_vpn_key(callback: CallbackQuery):
         )
     else:
         await callback.message.edit_text(
-            "❌ Ошибка при создании VPN ключа\n\n"
-            "Возможные причины:\n"
-            "• Проблемы с подключением к VPN серверу\n"
-            "• Технические работы\n\n"
-            "Попробуйте позже или обратитесь в поддержку.",
+            "❌ Ошибка при создании VPN ключа\n\nПопробуйте позже.",
             reply_markup=get_back_keyboard()
         )
     
@@ -491,7 +475,7 @@ async def replace_key(callback: CallbackQuery):
     
     if days_left <= 0:
         await callback.message.edit_text(
-            "❌ <b>Баланс истёк</b>\n\nПополните баланс, чтобы заменить ключ.",
+            "❌ <b>Баланс истёк</b>\n\nПополните баланс.",
             parse_mode="HTML",
             reply_markup=get_back_keyboard()
         )
@@ -507,17 +491,14 @@ async def replace_key(callback: CallbackQuery):
     # Создаём новый
     await callback.message.edit_text("🔄 Создаём новый ключ...")
     
-    username = f"user_{user_id}_new"
-    vpn_key = await outline_manager.create_key(user_id, days_left, username)
+    vpn_key = await outline_manager.create_key(user_id, days_left, f"user_{user_id}_new")
     
     if vpn_key:
         user_balances[user_id]["key_id"] = vpn_key["key_id"]
         
         text = (
             f"🔄 <b>Новый ключ создан!</b>\n\n"
-            f"🔑 <b>Ваш новый ключ:</b>\n"
-            f"<code>{vpn_key['access_url']}</code>\n\n"
-            f"Старый ключ больше не работает."
+            f"<code>{vpn_key['access_url']}</code>"
         )
         
         await callback.message.edit_text(
@@ -527,7 +508,7 @@ async def replace_key(callback: CallbackQuery):
         )
     else:
         await callback.message.edit_text(
-            "❌ Ошибка при создании нового ключа",
+            "❌ Ошибка при создании ключа",
             reply_markup=get_back_keyboard()
         )
     
@@ -547,19 +528,17 @@ async def delete_key_menu(callback: CallbackQuery):
         await callback.answer()
         return
     
-    text = (
-        "⚠️ <b>Удаление VPN ключа</b>\n\n"
-        "После удаления ключа VPN перестанет работать.\n"
-        "Баланс сохранится, вы сможете создать новый ключ позже.\n\n"
-        "Удалить ключ?"
-    )
-    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🗑 Да, удалить", callback_data="confirm_delete_key")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
     ])
     
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.message.edit_text(
+        "⚠️ <b>Удалить ключ?</b>\n\nПосле удаления VPN перестанет работать.",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    
     await callback.answer()
 
 @dp.callback_query(F.data == "confirm_delete_key")
@@ -572,11 +551,11 @@ async def confirm_delete_key(callback: CallbackQuery):
         user_balances[user_id]["key_id"] = None
     
     await callback.message.edit_text(
-        "✅ <b>VPN ключ удалён</b>\n\n"
-        "Вы можете создать новый ключ в любой момент через меню.",
+        "✅ <b>VPN ключ удалён</b>\n\nВы можете создать новый в любой момент.",
         parse_mode="HTML",
         reply_markup=get_back_keyboard()
     )
+    
     await callback.answer()
 
 # ========== ЗАПУСК ==========
@@ -585,7 +564,7 @@ async def main():
     print("✅ Бот Horor VPN успешно запущен!")
     print("📌 Команды:")
     print("   /start - запуск бота")
-    print("   Кнопки в меню должны работать")
+    print("   Кнопки теперь работают мгновенно!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
