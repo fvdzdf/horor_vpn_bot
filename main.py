@@ -1,77 +1,79 @@
 import asyncio
-import logging
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 
 # ========== КОНФИГУРАЦИЯ ==========
-BOT_TOKEN = "8483157396:AAEnsG9aN8MMLGr5gQm6rDtQcx373d_VREk"  # Ваш токен
-SUPPORT_USERNAME = "gffgvvvxzz"  # Username техподдержки
-
-# НАСТРОЙКИ OUTLINE VPN (замените на реальные)
-OUTLINE_API_URL = "https://YOUR_SERVER_IP:PORT/TOKEN"
-OUTLINE_CERT_SHA256 = "YOUR_CERTIFICATE_SHA256"
-
-# Путь к фото (положите фото в папку с ботом)
+BOT_TOKEN = "8653242237:AAGp4Zx8ubl80ie1tnCJy1dQDsWP2i8szNw"
+SUPPORT_USERNAME = "gffgvvvxzz"
 PHOTO_PATH = "horor_vpn_photo.jpg"
 
-# Цены в рублях
-PRICES = {
-    "10": 20,   # 10 дней - 20 руб
-    "20": 45,   # 20 дней - 45 руб
-    "30": 60    # 30 дней - 60 руб
-}
+# Outline VPN (закомментировано для тестирования)
+# from outline_vpn.outline_vpn import OutlineVPN
+# OUTLINE_API_URL = "https://127.0.0.1:51083/xlUG4F5BBft4rSrIvDSWuw/"
+# OUTLINE_CERT_SHA256 = "4EFF7BB90BCE5D4A172D338DC91B5B9975E197E39E3FA4FC42353763C4E58765"
 
-# База данных в памяти
-user_balances = {}
-user_referrals = {}
-referral_counts = {}
-user_history = {}
+# Цены в рублях за дни
+PRICES = {"10": 20, "20": 45, "30": 60}
 
-REFERRAL_DAYS = 7
+# База данных пользователей
+user_balances = {}  # {user_id: {"expire_date": date, "key_id": str, "rub": int}}
+
 REFERRAL_RUB = 10
 
-# ========== МОК-КЛАСС ДЛЯ OUTLINE ==========
-class MockOutlineManager:
-    """Временный класс для тестирования без реального VPN сервера"""
-    async def create_key(self, user_id, days_valid, username=None):
-        print(f"📝 Создан тестовый ключ для user_{user_id}")
-        return {
-            "key_id": f"test_key_{user_id}_{int(datetime.now().timestamp())}",
-            "access_url": f"ss://test://user_{user_id}@test.server.com",
-            "name": username or f"user_{user_id}"
-        }
-    
-    async def delete_key(self, key_id):
-        print(f"🗑 Удалён ключ: {key_id}")
-        return True
-    
-    async def get_key_info(self, key_id):
-        return {
-            "key_id": key_id,
-            "name": "test_key",
-            "access_url": "ss://test://test.server.com"
-        }
-    
-    async def list_all_keys(self):
-        return []
+# ========== ТЕСТОВЫЙ РЕЖИМ (без реального Outline) ==========
+async def create_outline_key(user_id, days):
+    """Тестовая функция - создает фейковый ключ"""
+    return f"ss://test://user_{user_id}_{datetime.now().timestamp()}@horor-vpn.com"
 
-# Используйте мок-класс пока нет реального сервера
-outline_manager = MockOutlineManager()
+async def delete_outline_key(key_id):
+    """Тестовая функция"""
+    return True
 
 # ========== ИНИЦИАЛИЗАЦИЯ БОТА ==========
-logging.basicConfig(level=logging.INFO)
-storage = MemoryStorage()
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(storage=storage)
+dp = Dispatcher(storage=MemoryStorage())
+
+# ========== КЛАВИАТУРЫ ==========
+def kb_main():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Меню", callback_data="menu")],
+        [InlineKeyboardButton(text="🎁 Рефералка", callback_data="referral")],
+        [InlineKeyboardButton(text="🆘 Поддержка", callback_data="support")]
+    ])
+
+def kb_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 Баланс", callback_data="balance")],
+        [InlineKeyboardButton(text="💳 Пополнить", callback_data="topup")],
+        [InlineKeyboardButton(text="🔑 Получить ключ", callback_data="get_key")],
+        [InlineKeyboardButton(text="🔄 Заменить ключ", callback_data="replace_key")],
+        [InlineKeyboardButton(text="🗑 Удалить ключ", callback_data="delete_key")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
+    ])
+
+def kb_back():
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back")]])
+
+def kb_topup():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="10 дней - 20 ₽", callback_data="topup_10")],
+        [InlineKeyboardButton(text="20 дней - 45 ₽", callback_data="topup_20")],
+        [InlineKeyboardButton(text="30 дней - 60 ₽", callback_data="topup_30")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
+    ])
+
+def kb_confirm_delete():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Да, удалить", callback_data="confirm_delete")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
+    ])
 
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
-def get_expire_date(days_from_now=0):
-    return datetime.now().date() + timedelta(days=days_from_now)
+def get_expire_date(days):
+    return datetime.now().date() + timedelta(days=days)
 
 def get_balance_days(user_id):
     if user_id not in user_balances or user_balances[user_id].get("expire_date") is None:
@@ -79,62 +81,9 @@ def get_balance_days(user_id):
     delta = (user_balances[user_id]["expire_date"] - datetime.now().date()).days
     return max(delta, 0)
 
-def get_rub_balance(user_id):
-    if user_id not in user_balances:
-        return 0
-    return user_balances[user_id].get("rub_balance", 0)
-
-def add_history(user_id, menu_name):
-    if user_id not in user_history:
-        user_history[user_id] = []
-    user_history[user_id].append(menu_name)
-    if len(user_history[user_id]) > 10:
-        user_history[user_id].pop(0)
-
-def get_previous_menu(user_id):
-    if user_id not in user_history or len(user_history[user_id]) <= 1:
-        return "main"
-    user_history[user_id].pop()
-    return user_history[user_id][-1] if user_history[user_id] else "main"
-
-# ========== КЛАВИАТУРЫ ==========
-def get_main_keyboard():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Меню", callback_data="menu")],
-        [InlineKeyboardButton(text="🎁 Реферальная система", callback_data="referral")],
-        [InlineKeyboardButton(text="🆘 Поддержка", callback_data="support")]
-    ])
-    return keyboard
-
-def get_menu_keyboard():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 Баланс", callback_data="balance")],
-        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup")],
-        [InlineKeyboardButton(text="🔑 Получить ключ доступа", callback_data="get_key")],
-        [InlineKeyboardButton(text="🔄 Заменить ключ доступа", callback_data="replace_key")],
-        [InlineKeyboardButton(text="🗑 Удалить ключ доступа", callback_data="delete_key")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
-    ])
-    return keyboard
-
-def get_topup_keyboard():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📆 10 дней - 20 ₽", callback_data="topup_10")],
-        [InlineKeyboardButton(text="📆 20 дней - 45 ₽", callback_data="topup_20")],
-        [InlineKeyboardButton(text="📆 30 дней - 60 ₽", callback_data="topup_30")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
-    ])
-    return keyboard
-
-def get_back_keyboard():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
-    ])
-    return keyboard
-
-# ========== ОБРАБОТЧИКИ КОМАНД ==========
+# ========== ОБРАБОТЧИКИ ==========
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
+async def start(message: types.Message):
     user_id = message.from_user.id
     
     # Реферальная логика
@@ -142,429 +91,187 @@ async def cmd_start(message: types.Message):
     if len(args) > 1 and args[1].startswith("ref_"):
         try:
             referrer_id = int(args[1].split("_")[1])
-            if referrer_id != user_id and user_id not in user_referrals:
-                user_referrals[user_id] = referrer_id
-                referral_counts[referrer_id] = referral_counts.get(referrer_id, 0) + 1
-                
+            if referrer_id != user_id and referrer_id not in user_balances.get(user_id, {}):
                 if referrer_id in user_balances:
-                    user_balances[referrer_id]["rub_balance"] = user_balances[referrer_id].get("rub_balance", 0) + REFERRAL_RUB
-                else:
-                    user_balances[referrer_id] = {
-                        "expire_date": None,
-                        "key_id": None,
-                        "rub_balance": REFERRAL_RUB
-                    }
-                
-                try:
-                    await bot.send_message(referrer_id, f"🎉 По вашей ссылке присоединился новый пользователь! Вы получили +{REFERRAL_RUB} ₽ на баланс.")
-                except:
-                    pass
+                    user_balances[referrer_id]["rub"] = user_balances[referrer_id].get("rub", 0) + REFERRAL_RUB
+                    try:
+                        await bot.send_message(referrer_id, f"🎉 +{REFERRAL_RUB} ₽ за приглашение!")
+                    except:
+                        pass
         except:
             pass
     
-    # Создаем пользователя
+    # Новый пользователь
     if user_id not in user_balances:
         user_balances[user_id] = {
             "expire_date": get_expire_date(7),
             "key_id": None,
-            "rub_balance": 0
+            "rub": 0
         }
     
-    add_history(user_id, "main")
-    
-    welcome_text = (
-        "🌟 <b>Добро пожаловать в Horor VPN!</b> 🌟\n\n"
-        "🚀 Высокая скорость\n"
-        "📶 Без ограничений по трафику\n"
-        "💰 Низкие цены\n"
-        "🖱 Настройка в несколько кликов\n"
-        "🎁 Вознаграждение за приглашение друзей\n"
-        "👩‍💻 Оперативная онлайн поддержка\n\n"
-        "👇 Выберите действие ниже 👇"
-    )
-    
+    text = "🌟 Добро пожаловать в Horor VPN!\n🚀 Высокая скорость\n💰 Низкие цены\n👇 Выберите действие"
     try:
-        photo = FSInputFile(PHOTO_PATH)
-        await message.answer_photo(
-            photo=photo,
-            caption=welcome_text,
-            parse_mode="HTML",
-            reply_markup=get_main_keyboard()
-        )
+        await message.answer_photo(photo=FSInputFile(PHOTO_PATH), caption=text, reply_markup=kb_main())
     except:
-        await message.answer(
-            welcome_text,
-            parse_mode="HTML",
-            reply_markup=get_main_keyboard()
-        )
+        await message.answer(text, reply_markup=kb_main())
 
-# ========== ИСПРАВЛЕННЫЕ ОБРАБОТЧИКИ КНОПОК ==========
+@dp.callback_query(F.data == "menu")
+async def menu(callback: types.CallbackQuery):
+    await callback.message.edit_text("📋 Меню:", reply_markup=kb_menu())
+    await callback.answer()
 
 @dp.callback_query(F.data == "back")
-async def back_button(callback: CallbackQuery, state: FSMContext):
-    user_id = callback.from_user.id
-    previous_menu = get_previous_menu(user_id)
-    
-    await state.clear()
-    
-    if previous_menu == "main":
-        welcome_text = (
-            "🌟 <b>Добро пожаловать в Horor VPN!</b> 🌟\n\n"
-            "🚀 Высокая скорость\n"
-            "📶 Без ограничений по трафику\n"
-            "💰 Низкие цены\n"
-            "🖱 Настройка в несколько кликов\n"
-            "🎁 Вознаграждение за приглашение друзей\n"
-            "👩‍💻 Оперативная онлайн поддержка\n\n"
-            "👇 Выберите действие ниже 👇"
-        )
-        try:
-            await callback.message.edit_caption(
-                caption=welcome_text,
-                parse_mode="HTML",
-                reply_markup=get_main_keyboard()
-            )
-        except:
-            await callback.message.edit_text(
-                welcome_text,
-                parse_mode="HTML",
-                reply_markup=get_main_keyboard()
-            )
-    else:
-        await callback.message.edit_text(
-            "📋 <b>Меню</b>\n\nВыберите нужное действие:",
-            parse_mode="HTML",
-            reply_markup=get_menu_keyboard()
-        )
-    
+async def back(callback: types.CallbackQuery):
+    await callback.message.edit_text("🌟 Главное меню:", reply_markup=kb_main())
     await callback.answer()
 
 @dp.callback_query(F.data == "referral")
-async def referral_system(callback: CallbackQuery):
-    user_id = callback.from_user.id
+async def referral(callback: types.CallbackQuery):
     bot_info = await bot.get_me()
-    ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
-    count = referral_counts.get(user_id, 0)
-    
-    add_history(user_id, "referral")
-    
-    text = (
-        f"🎁 <b>Реферальная система</b>\n\n"
-        f"За каждого приведенного друга вы получаете:\n"
-        f"💰 +{REFERRAL_RUB} ₽ на баланс\n"
-        f"📆 +{REFERRAL_DAYS} дней подписки\n\n"
-        f"👥 Приглашено друзей: {count}\n\n"
-        f"🔗 <b>Ваша индивидуальная ссылка:</b>\n"
-        f"<code>{ref_link}</code>\n\n"
-        f"📤 Отправьте её друзьям и получайте бонусы!"
-    )
-    
+    ref_link = f"https://t.me/{bot_info.username}?start=ref_{callback.from_user.id}"
     await callback.message.edit_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=get_back_keyboard()
+        f"🎁 Реферальная ссылка:\n<code>{ref_link}</code>\n+{REFERRAL_RUB}₽ за друга",
+        parse_mode="HTML", reply_markup=kb_back()
     )
-    
     await callback.answer()
 
 @dp.callback_query(F.data == "support")
-async def support(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    add_history(user_id, "support")
-    
-    text = f"👩‍💻 <b>Техническая поддержка</b>\n\nДля связи с техподдержкой напишите сюда:\n👉 @{SUPPORT_USERNAME}\n\nМы ответим в ближайшее время!"
-    
-    await callback.message.edit_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=get_back_keyboard()
-    )
-    
-    await callback.answer()
-
-@dp.callback_query(F.data == "menu")
-async def show_menu(callback: CallbackQuery):
-    add_history(callback.from_user.id, "menu")
-    
-    await callback.message.edit_text(
-        "📋 <b>Меню</b>\n\nВыберите нужное действие:",
-        parse_mode="HTML",
-        reply_markup=get_menu_keyboard()
-    )
-    
+async def support(callback: types.CallbackQuery):
+    await callback.message.edit_text(f"🆘 Поддержка: @{SUPPORT_USERNAME}", reply_markup=kb_back())
     await callback.answer()
 
 @dp.callback_query(F.data == "balance")
-async def show_balance(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    days_left = get_balance_days(user_id)
-    rub_balance = get_rub_balance(user_id)
-    
-    add_history(user_id, "balance")
-    
-    if days_left <= 0:
-        days_text = "❌ Истёк"
-    else:
-        days_text = f"✅ {days_left} дн."
-    
-    text = (
-        f"💰 <b>Ваш баланс</b>\n\n"
-        f"💵 <b>Рублевый баланс:</b> {rub_balance} ₽\n"
-        f"📆 <b>Подписка активна:</b> {days_text}\n\n"
-        f"<i>Пополнить баланс можно через:</i>\n"
-        f"• Реферальную систему (приглашайте друзей)\n"
-        f"• Кнопку «Пополнить баланс» в меню"
-    )
-    
+async def balance(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    days = get_balance_days(uid)
+    rub = user_balances[uid].get("rub", 0)
+    days_text = "❌ Истёк" if days <= 0 else f"✅ {days} дн."
     await callback.message.edit_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=get_back_keyboard()
+        f"💰 Баланс:\n💵 Рублей: {rub}₽\n📆 Подписка: {days_text}",
+        reply_markup=kb_back()
     )
-    
     await callback.answer()
 
 @dp.callback_query(F.data == "topup")
-async def topup_menu(callback: CallbackQuery):
-    add_history(callback.from_user.id, "topup")
-    
-    text = (
-        "💳 <b>Пополнение баланса</b>\n\n"
-        "Выберите подходящий тариф:\n\n"
-        "📆 10 дней — <b>20 ₽</b>\n"
-        "📆 20 дней — <b>45 ₽</b>\n"
-        "📆 30 дней — <b>60 ₽</b>\n\n"
-        "💰 После оплаты дни будут добавлены к вашей подписке."
-    )
-    
-    await callback.message.edit_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=get_topup_keyboard()
-    )
-    
+async def topup(callback: types.CallbackQuery):
+    await callback.message.edit_text("💳 Выберите тариф:", reply_markup=kb_topup())
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("topup_"))
-async def process_topup(callback: CallbackQuery):
+async def process_topup(callback: types.CallbackQuery):
     days = int(callback.data.split("_")[1])
     amount = PRICES[str(days)]
-    user_id = callback.from_user.id
+    uid = callback.from_user.id
     
-    add_history(user_id, "payment")
-    
-    rub_balance = get_rub_balance(user_id)
-    
-    if rub_balance >= amount:
-        user_balances[user_id]["rub_balance"] = rub_balance - amount
-        
-        current_expire = user_balances[user_id].get("expire_date")
-        if current_expire and current_expire > datetime.now().date():
-            new_expire = current_expire + timedelta(days=days)
-        else:
-            new_expire = get_expire_date(days)
-        user_balances[user_id]["expire_date"] = new_expire
-        
+    if user_balances[uid].get("rub", 0) >= amount:
+        user_balances[uid]["rub"] -= amount
+        new_date = max(user_balances[uid].get("expire_date", datetime.now().date()), datetime.now().date()) + timedelta(days=days)
+        user_balances[uid]["expire_date"] = new_date
         await callback.message.edit_text(
-            f"✅ <b>Оплата прошла успешно!</b>\n\n"
-            f"Списано: {amount} ₽\n"
-            f"Добавлено: {days} дней\n\n"
-            f"📆 Подписка активна до: {new_expire.strftime('%d.%m.%Y')}",
-            parse_mode="HTML",
-            reply_markup=get_back_keyboard()
+            f"✅ Оплачено! Подписка до {new_date.strftime('%d.%m.%Y')}",
+            reply_markup=kb_back()
         )
     else:
-        need = amount - rub_balance
-        text = (
-            f"⚠️ <b>Недостаточно средств на балансе</b>\n\n"
-            f"💰 Ваш баланс: {rub_balance} ₽\n"
-            f"💸 Нужно: {amount} ₽\n"
-            f"❌ Не хватает: {need} ₽\n\n"
-            f"<b>💳 Реквизиты для оплаты:</b>\n"
-            f"СБП: +7 XXX XXX XX-XX\n"
-            f"Карта: XXXX XXXX XXXX XXXX\n\n"
-            f"<i>После оплаты напишите в поддержку для пополнения баланса</i>"
-        )
-        
+        need = amount - user_balances[uid].get("rub", 0)
         await callback.message.edit_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=get_back_keyboard()
+            f"⚠️ Не хватает {need}₽\n\n💳 Реквизиты: +7 XXX XXX XX-XX",
+            reply_markup=kb_back()
         )
-    
     await callback.answer()
 
 @dp.callback_query(F.data == "get_key")
-async def get_vpn_key(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    days_left = get_balance_days(user_id)
+async def get_key(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    days = get_balance_days(uid)
     
-    add_history(user_id, "get_key")
+    if days <= 0:
+        await callback.message.edit_text("❌ Нет активной подписки", reply_markup=kb_back())
+        await callback.answer()
+        return
     
-    if days_left <= 0:
+    # Если ключ уже есть - показываем его
+    if user_balances[uid].get("key_id"):
         await callback.message.edit_text(
-            "❌ <b>У вас нет активной подписки</b>\n\n"
-            "Пополните баланс, чтобы получить ключ доступа.",
-            parse_mode="HTML",
-            reply_markup=get_back_keyboard()
+            f"🔑 Ваш активный ключ:\n<code>ss://...{uid}</code>\n📅 Действует {days} дн.",
+            parse_mode="HTML", reply_markup=kb_back()
         )
         await callback.answer()
         return
     
-    # Проверяем, есть ли уже ключ
-    if user_balances[user_id].get("key_id"):
-        key_info = await outline_manager.get_key_info(user_balances[user_id]["key_id"])
-        if key_info:
-            expire_date = user_balances[user_id].get('expire_date')
-            expire_str = expire_date.strftime('%d.%m.%Y') if expire_date else "Неизвестно"
-            
-            text = (
-                f"🔑 <b>Ваш активный ключ</b>\n\n"
-                f"<code>{key_info['access_url']}</code>\n\n"
-                f"📱 <b>Инструкция по подключению:</b>\n"
-                f"1. Скачайте Outline Client\n"
-                f"2. Нажмите «Добавить сервер»\n"
-                f"3. Вставьте ключ\n\n"
-                f"📅 Подписка до: {expire_str}"
-            )
-            
-            await callback.message.edit_text(
-                text,
-                parse_mode="HTML",
-                reply_markup=get_back_keyboard()
-            )
-            await callback.answer()
-            return
-    
     # Создаём новый ключ
-    await callback.message.edit_text("🔄 Создаём VPN ключ... Подождите...")
+    await callback.message.edit_text("🔄 Создаём ключ...")
     
-    vpn_key = await outline_manager.create_key(user_id, days_left, f"user_{user_id}")
+    access_url = await create_outline_key(uid, days)
     
-    if vpn_key:
-        user_balances[user_id]["key_id"] = vpn_key["key_id"]
-        expire_date = user_balances[user_id].get('expire_date')
-        expire_str = expire_date.strftime('%d.%m.%Y') if expire_date else "Неизвестно"
-        
-        text = (
-            f"✅ <b>VPN ключ создан!</b>\n\n"
-            f"🔑 <b>Ваш ключ:</b>\n"
-            f"<code>{vpn_key['access_url']}</code>\n\n"
-            f"📅 Действителен до: {expire_str}"
-        )
-        
+    if access_url:
+        user_balances[uid]["key_id"] = f"key_{uid}"
         await callback.message.edit_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=get_back_keyboard()
+            f"✅ VPN ключ создан!\n\n🔑 <code>{access_url}</code>\n\n📅 Действует {days} дн.\n⚠️ Ключ персональный",
+            parse_mode="HTML", reply_markup=kb_back()
         )
     else:
-        await callback.message.edit_text(
-            "❌ Ошибка при создании VPN ключа\n\nПопробуйте позже.",
-            reply_markup=get_back_keyboard()
-        )
+        await callback.message.edit_text("❌ Ошибка создания ключа", reply_markup=kb_back())
     
     await callback.answer()
 
 @dp.callback_query(F.data == "replace_key")
-async def replace_key(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    days_left = get_balance_days(user_id)
+async def replace_key(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    days = get_balance_days(uid)
     
-    add_history(user_id, "replace_key")
-    
-    if days_left <= 0:
-        await callback.message.edit_text(
-            "❌ <b>Баланс истёк</b>\n\nПополните баланс.",
-            parse_mode="HTML",
-            reply_markup=get_back_keyboard()
-        )
+    if days <= 0:
+        await callback.message.edit_text("❌ Нет активной подписки", reply_markup=kb_back())
         await callback.answer()
         return
     
     # Удаляем старый ключ
-    old_key_id = user_balances[user_id].get("key_id")
-    if old_key_id:
-        await outline_manager.delete_key(old_key_id)
-        user_balances[user_id]["key_id"] = None
+    if user_balances[uid].get("key_id"):
+        await delete_outline_key(user_balances[uid]["key_id"])
+        user_balances[uid]["key_id"] = None
     
     # Создаём новый
     await callback.message.edit_text("🔄 Создаём новый ключ...")
     
-    vpn_key = await outline_manager.create_key(user_id, days_left, f"user_{user_id}_new")
+    access_url = await create_outline_key(uid, days)
     
-    if vpn_key:
-        user_balances[user_id]["key_id"] = vpn_key["key_id"]
-        
-        text = (
-            f"🔄 <b>Новый ключ создан!</b>\n\n"
-            f"<code>{vpn_key['access_url']}</code>"
-        )
-        
+    if access_url:
+        user_balances[uid]["key_id"] = f"key_{uid}_{int(datetime.now().timestamp())}"
         await callback.message.edit_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=get_back_keyboard()
+            f"🔄 Новый ключ:\n<code>{access_url}</code>",
+            parse_mode="HTML", reply_markup=kb_back()
         )
     else:
-        await callback.message.edit_text(
-            "❌ Ошибка при создании ключа",
-            reply_markup=get_back_keyboard()
-        )
+        await callback.message.edit_text("❌ Ошибка", reply_markup=kb_back())
     
     await callback.answer()
 
 @dp.callback_query(F.data == "delete_key")
-async def delete_key_menu(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    
-    add_history(user_id, "delete_key")
-    
-    if not user_balances[user_id].get("key_id"):
+async def delete_key_menu(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    if not user_balances[uid].get("key_id"):
+        await callback.message.edit_text("❌ Нет активного ключа", reply_markup=kb_back())
+    else:
         await callback.message.edit_text(
-            "❌ У вас нет активного ключа",
-            reply_markup=get_back_keyboard()
+            "⚠️ Удалить ключ? VPN перестанет работать.",
+            reply_markup=kb_confirm_delete()
         )
-        await callback.answer()
-        return
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🗑 Да, удалить", callback_data="confirm_delete_key")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
-    ])
-    
-    await callback.message.edit_text(
-        "⚠️ <b>Удалить ключ?</b>\n\nПосле удаления VPN перестанет работать.",
-        parse_mode="HTML",
-        reply_markup=keyboard
-    )
-    
     await callback.answer()
 
-@dp.callback_query(F.data == "confirm_delete_key")
-async def confirm_delete_key(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    key_id = user_balances[user_id].get("key_id")
-    
+@dp.callback_query(F.data == "confirm_delete")
+async def confirm_delete(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    key_id = user_balances[uid].get("key_id")
     if key_id:
-        await outline_manager.delete_key(key_id)
-        user_balances[user_id]["key_id"] = None
-    
-    await callback.message.edit_text(
-        "✅ <b>VPN ключ удалён</b>\n\nВы можете создать новый в любой момент.",
-        parse_mode="HTML",
-        reply_markup=get_back_keyboard()
-    )
-    
+        await delete_outline_key(key_id)
+        user_balances[uid]["key_id"] = None
+    await callback.message.edit_text("✅ Ключ удалён", reply_markup=kb_back())
     await callback.answer()
 
 # ========== ЗАПУСК ==========
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
-    print("✅ Бот Horor VPN успешно запущен!")
-    print("📌 Команды:")
-    print("   /start - запуск бота")
-    print("   Кнопки теперь работают мгновенно!")
+    print("✅ Бот Horor VPN запущен!")
+    print("📌 Режим: ТЕСТОВЫЙ (без реального Outline)")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
